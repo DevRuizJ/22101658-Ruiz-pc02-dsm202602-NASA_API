@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">AppNASA</string>
+    <string name="images_tab">Imágenes</string>
+    <string name="asteroids_tab">Asteroides</string>
+    <string name="images_icon">✦</string>
+    <string name="asteroids_icon">☄</string>
+</resources>
