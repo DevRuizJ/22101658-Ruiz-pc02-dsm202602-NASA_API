@@ -43,92 +43,61 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import dev.ruizj.appnasa.R
-
-private enum class ImagesScreen {
-    List,
-    Favorites,
-    Detail,
-}
+import androidx.navigation.NavType
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 
 @Composable
 fun ImagesFeature(viewModel: ApodViewModel, modifier: Modifier = Modifier) {
     val state by viewModel.uiState.collectAsState()
-    var screen by rememberSaveable { mutableStateOf(ImagesScreen.List) }
-    var selectedDate by rememberSaveable { mutableStateOf<String?>(null) }
-    var selectedItem by remember { mutableStateOf<ApodItem?>(null) }
-    var detailFromFavorites by rememberSaveable { mutableStateOf(false) }
+    val navController = rememberNavController()
 
-    BackHandler(enabled = screen != ImagesScreen.List) {
-        screen = when (screen) {
-            ImagesScreen.Detail -> if (detailFromFavorites) {
-                ImagesScreen.Favorites
-            } else {
-                ImagesScreen.List
-            }
-
-            ImagesScreen.Favorites -> ImagesScreen.List
-            ImagesScreen.List -> ImagesScreen.List
+    NavHost(navController = navController, startDestination = "apod/list", modifier = modifier) {
+        composable("apod/list") {
+            ApodListScreen(
+                title = stringResource(R.string.images_title),
+                items = state.items,
+                favorites = state.favorites,
+                isLoading = state.isLoading,
+                errorMessage = state.apodErrorMessage,
+                incompleteRecords = state.incompleteRecords,
+                onRefresh = viewModel::refresh,
+                onShowFavorites = { navController.navigate("apod/favorites") },
+                onSelectItem = { item -> navController.navigate("apod/detail/${item.date}") },
+                onToggleFavorite = viewModel::toggleFavorite,
+            )
         }
-    }
-
-    when (screen) {
-        ImagesScreen.List -> ApodListScreen(
-            title = stringResource(R.string.images_title),
-            items = state.items,
-            favorites = state.favorites,
-            isLoading = state.isLoading,
-            errorMessage = state.apodErrorMessage,
-            incompleteRecords = state.incompleteRecords,
-            onRefresh = viewModel::refresh,
-            onShowFavorites = { screen = ImagesScreen.Favorites },
-            onSelectItem = { item ->
-                selectedDate = item.date
-                selectedItem = item
-                detailFromFavorites = false
-                screen = ImagesScreen.Detail
-            },
-            onToggleFavorite = viewModel::toggleFavorite,
-            modifier = modifier,
-        )
-
-        ImagesScreen.Favorites -> ApodListScreen(
-            title = stringResource(R.string.favorites_title),
-            items = state.favorites,
-            favorites = state.favorites,
-            isLoading = state.isFavoritesLoading,
-            errorMessage = state.favoritesErrorMessage,
-            incompleteRecords = 0,
-            onRefresh = null,
-            onShowFavorites = null,
-            onSelectItem = { item ->
-                selectedDate = item.date
-                selectedItem = item
-                detailFromFavorites = true
-                screen = ImagesScreen.Detail
-            },
-            onToggleFavorite = viewModel::toggleFavorite,
-            onBack = { screen = ImagesScreen.List },
-            modifier = modifier,
-        )
-
-        ImagesScreen.Detail -> {
-            val item = selectedItem?.takeIf { it.date == selectedDate }
-                ?: state.items.firstOrNull { it.date == selectedDate }
-                ?: state.favorites.firstOrNull { it.date == selectedDate }
+        composable("apod/favorites") {
+            ApodListScreen(
+                title = stringResource(R.string.favorites_title),
+                items = state.favorites,
+                favorites = state.favorites,
+                isLoading = state.isFavoritesLoading,
+                errorMessage = state.favoritesErrorMessage,
+                incompleteRecords = 0,
+                onRefresh = null,
+                onShowFavorites = null,
+                onSelectItem = { item -> navController.navigate("apod/detail/${item.date}") },
+                onToggleFavorite = viewModel::toggleFavorite,
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(
+            route = "apod/detail/{date}",
+            arguments = listOf(navArgument("date") { type = NavType.StringType }),
+        ) { entry ->
+            val date = entry.arguments?.getString("date")
+            val item = state.items.firstOrNull { it.date == date }
+                ?: state.favorites.firstOrNull { it.date == date }
             if (item != null) {
                 ApodDetailScreen(
                     item = item,
                     isFavorite = state.favorites.any { it.date == item.date },
-                    onBack = {
-                        screen = if (detailFromFavorites) {
-                            ImagesScreen.Favorites
-                        } else {
-                            ImagesScreen.List
-                        }
-                    },
+                    onBack = { navController.popBackStack() },
                     onToggleFavorite = { viewModel.toggleFavorite(item) },
                     errorMessage = state.favoritesErrorMessage,
-                    modifier = modifier,
                 )
             }
         }

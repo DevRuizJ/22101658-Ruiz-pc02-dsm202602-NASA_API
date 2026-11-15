@@ -3,6 +3,7 @@ import java.util.Properties
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.ksp)
 }
 
 val localProperties = Properties().apply {
@@ -33,8 +34,7 @@ android {
         buildConfigField("String", "NEOWS_BASE_URL", "\"https://api.nasa.gov/\"")
         buildConfigField("String", "NEOWS_FEED_ENDPOINT", "\"neo/rest/v1/feed\"")
         buildConfigField("String", "NEOWS_LOOKUP_ENDPOINT", "\"neo/rest/v1/neo/\"")
-        buildConfigField("String", "APOD_BASE_URL", "\"https://api.nasa.gov/planetary/\"")
-        buildConfigField("String", "APOD_ENDPOINT", "\"apod\"")
+        buildConfigField("String", "APOD_BASE_URL", "\"https://science.nasa.gov/\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -67,8 +67,14 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.navigation.compose)
     implementation(libs.coil.compose)
     implementation(libs.gson)
+    implementation(libs.retrofit)
+    implementation(libs.retrofit.converter.gson)
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)

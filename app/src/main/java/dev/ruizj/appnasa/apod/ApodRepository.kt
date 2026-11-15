@@ -1,124 +1,106 @@
 package dev.ruizj.appnasa.apod
 
-import dev.ruizj.appnasa.BuildConfig
+import com.google.gson.Gson
 import com.google.gson.JsonElement
-import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import dev.ruizj.appnasa.BuildConfig
+import dev.ruizj.appnasa.data.ApodApi
 import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
-import java.net.URLEncoder
 import java.time.LocalDate
 import java.time.format.DateTimeParseException
-
-class ApodRepository {
-    fun fetch(startDate: LocalDate, endDate: LocalDate): ApodFetchResult {
-        val requestUrl = buildString {
-            append(BuildConfig.APOD_BASE_URL)
-            append(BuildConfig.APOD_ENDPOINT)
-            append("?api_key=")
-            append(encode(BuildConfig.NASA_API_KEY))
-            append("&start_date=")
-            append(encode(startDate.toString()))
-            append("&end_date=")
-            append(encode(endDate.toString()))
-        }
-        val connection = (URL(requestUrl).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 15_000
-            readTimeout = 15_000
-            setRequestProperty("Accept", "application/json")
-        }
-
-        try {
-            val responseCode = connection.responseCode
-            if (responseCode !in 200..299) {
-                throw IOException("NASA APOD request failed with HTTP $responseCode.")
-            }
-
-            val response = connection.inputStream.bufferedReader().use { it.readText() }
-            return parseApodResponse(response, startDate, endDate)
-        } finally {
-            connection.disconnect()
-        }
-    }
-
-    private fun encode(value: String): String = URLEncoder.encode(value, Charsets.UTF_8.name())
-}
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 
 data class ApodFetchResult(
     val items: List<ApodItem>,
     val incompleteRecords: Int,
 )
 
-internal fun parseApodResponse(
-    response: String,
+class ApodRepository(
+    private val api: ApodApi,
+    private val dao: ApodDao,
+    private val gson: Gson = Gson(),
+) {
+    fun observeItems(): Flow<List<ApodItem>> = dao.observeAll().map { rows ->
+        rows.map(ApodEntity::toDomain)
+    }
+
+    fun observeFavorites(): Flow<List<ApodItem>> = dao.observeFavorites().map { rows ->
+        rows.map(ApodEntity::toDomain)
+    }
+
+    suspend fun refresh(startDate: LocalDate, endDate: LocalDate): Int {
+        val response = api.getApod(
+            apiKey = BuildConfig.NASA_API_KEY,
+            startDate = startDate.toString(),
+            endDate = endDate.toString(),
+        )
+        if (!response.isSuccessful) {
+            throw IOException("NASA APOD request failed with HTTP ${response.code()}.")
+        }
+        val body = response.body()
+            ?: throw IOException("NASA APOD response body is empty.")
+        val result = mapApodResponse(body, startDate, endDate, gson)
+        dao.upsertFromApi(result.items)
+        return result.incompleteRecords
+    }
+
+    suspend fun toggleFavorite(date: String) {
+        if (dao.toggleFavorite(date) == 0) {
+            throw IOException("APOD item '$date' is no longer available.")
+        }
+    }
+
+}
+
+internal fun mapApodResponse(
+    body: JsonElement,
     startDate: LocalDate,
     endDate: LocalDate,
+    gson: Gson = Gson(),
 ): ApodFetchResult {
-    val parsedResponse = JsonParser.parseString(response)
-    val jsonItems = parsedResponse.takeIf(JsonElement::isJsonArray)?.asJsonArray
+    val jsonItems = body.takeIf(JsonElement::isJsonArray)?.asJsonArray
         ?: throw IOException("NASA APOD response is not a JSON array.")
     var incompleteRecords = 0
     val items = buildList {
-        for (itemElement in jsonItems) {
-            val item = itemElement.takeIf(JsonElement::isJsonObject)?.asJsonObject
+        for (element in jsonItems) {
+            if (!element.isJsonObject) {
+                incompleteRecords++
+                continue
+            }
+            val dto = gson.fromJson(element, ApodDto::class.java)
+            val item = dto.toDomainOrNull()
             if (item == null) {
                 incompleteRecords++
                 continue
             }
-            val date = item.optionalString("date")
-            val parsedDate = date?.let {
-                try {
-                    LocalDate.parse(it)
-                } catch (_: DateTimeParseException) {
-                    null
-                }
-            }
-            if (parsedDate == null) {
+            val date = try {
+                LocalDate.parse(item.date)
+            } catch (_: DateTimeParseException) {
                 incompleteRecords++
                 continue
             }
-            if (parsedDate < startDate || parsedDate > endDate) continue
-
-            val title = item.optionalString("title")
-            val explanation = item.optionalString("explanation")
-            val mediaType = item.optionalString("media_type")
-                ?.takeIf { it == "image" || it == "video" }
-            val hdUrl = item.optionalString("hdurl")
-            if (title == null || explanation == null || mediaType == null ||
-                (mediaType == "image" && hdUrl == null)
+            if (date < startDate || date > endDate) continue
+            if (
+                dto.title.isNullOrBlank() ||
+                dto.explanation.isNullOrBlank() ||
+                dto.mediaType !in setOf("image", "video") ||
+                (dto.mediaType == "image" && dto.hdurl.isNullOrBlank())
             ) {
                 incompleteRecords++
             }
-            add(
-                ApodItem(
-                    date = parsedDate.toString(),
-                    title = title ?: "Sin título",
-                    explanation = explanation ?: "Descripción no disponible.",
-                    mediaType = mediaType ?: "unknown",
-                    imageUrl = hdUrl.takeIf { mediaType == "image" },
-                    credit = item.optionalString("credit")
-                        ?: item.optionalString("copyright"),
-                ),
-            )
+            add(item)
         }
     }.sortedByDescending(ApodItem::date)
     return ApodFetchResult(items, incompleteRecords)
 }
 
-private fun JsonObject.optionalString(key: String): String? =
-    get(key)
-        ?.takeIf(JsonElement::isJsonPrimitive)
-        ?.asJsonPrimitive
-        ?.takeIf { it.isString || it.isNumber }
-        ?.asString
-        ?.takeUnless(String::isBlank)
-
-fun List<ApodItem>.filterApodRange(
+internal fun parseApodResponse(
+    response: String,
     startDate: LocalDate,
     endDate: LocalDate,
-): List<ApodItem> = filter { item ->
-    val date = LocalDate.parse(item.date)
-    date >= startDate && date <= endDate
-}.sortedByDescending { it.date }
+): ApodFetchResult = mapApodResponse(
+    JsonParser.parseString(response),
+    startDate,
+    endDate,
+)

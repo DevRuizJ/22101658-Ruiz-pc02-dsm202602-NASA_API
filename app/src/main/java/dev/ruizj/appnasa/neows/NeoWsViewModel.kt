@@ -3,23 +3,23 @@ package dev.ruizj.appnasa.neows
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import dev.ruizj.appnasa.NasaApplication
+import java.time.LocalDate
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.time.LocalDate
 
 data class NeoWsUiState(
     val asteroids: List<NearEarthObject> = emptyList(),
     val favorites: List<NearEarthObject> = emptyList(),
     val isLoading: Boolean = false,
-    val isFavoritesLoading: Boolean = true,
+    val isFavoritesLoading: Boolean = false,
     val showHazardousOnly: Boolean = false,
     val incompleteRecords: Int = 0,
     val feedErrorMessage: String? = null,
@@ -27,9 +27,7 @@ data class NeoWsUiState(
 )
 
 class NeoWsViewModel(application: Application) : AndroidViewModel(application) {
-    private val repository = NeoWsRepository()
-    private val favoritesDatabase = NeoWsFavoritesDatabase(application)
-    private val favoritesMutex = Mutex()
+    private val repository = (application as NasaApplication).neoWsRepository
     private val mutableUiState = MutableStateFlow(NeoWsUiState())
     val uiState = mutableUiState.asStateFlow()
     private var lastLoadedDate: LocalDate? = null
@@ -37,23 +35,10 @@ class NeoWsViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         viewModelScope.launch {
-            try {
-                favoritesMutex.withLock {
-                    val favorites = withContext(Dispatchers.IO) {
-                        favoritesDatabase.getFavorites()
-                    }
-                    mutableUiState.update {
-                        it.copy(favorites = favorites, isFavoritesLoading = false)
-                    }
-                }
-            } catch (error: Exception) {
-                if (error is CancellationException) throw error
-                mutableUiState.update {
-                    it.copy(
-                        isFavoritesLoading = false,
-                        favoritesErrorMessage = error.message ?: "Unknown database error.",
-                    )
-                }
+            combine(repository.observeItems(), repository.observeFavorites()) { items, favorites ->
+                items to favorites
+            }.collect { (items, favorites) ->
+                mutableUiState.update { it.copy(asteroids = items, favorites = favorites) }
             }
         }
     }
@@ -70,15 +55,11 @@ class NeoWsViewModel(application: Application) : AndroidViewModel(application) {
         loadJob = viewModelScope.launch {
             mutableUiState.update { it.copy(isLoading = true, feedErrorMessage = null) }
             try {
-                val result = withContext(Dispatchers.IO) {
-                    repository.fetch(startDate, endDate)
+                val incompleteRecords = withContext(Dispatchers.IO) {
+                    repository.refresh(startDate, endDate)
                 }
                 mutableUiState.update {
-                    it.copy(
-                        asteroids = result.items,
-                        incompleteRecords = result.incompleteRecords,
-                        isLoading = false,
-                    )
+                    it.copy(incompleteRecords = incompleteRecords, isLoading = false)
                 }
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
@@ -100,19 +81,8 @@ class NeoWsViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleFavorite(asteroid: NearEarthObject) {
         viewModelScope.launch {
             try {
-                favoritesMutex.withLock {
-                    val favorites = withContext(Dispatchers.IO) {
-                        if (mutableUiState.value.favorites.any { it.id == asteroid.id }) {
-                            favoritesDatabase.removeFavorite(asteroid.id)
-                        } else {
-                            favoritesDatabase.saveFavorite(asteroid)
-                        }
-                        favoritesDatabase.getFavorites()
-                    }
-                    mutableUiState.update {
-                        it.copy(favorites = favorites, favoritesErrorMessage = null)
-                    }
-                }
+                repository.toggleFavorite(asteroid.id)
+                mutableUiState.update { it.copy(favoritesErrorMessage = null) }
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
                 mutableUiState.update {
@@ -123,10 +93,5 @@ class NeoWsViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
-    }
-
-    override fun onCleared() {
-        favoritesDatabase.close()
-        super.onCleared()
     }
 }

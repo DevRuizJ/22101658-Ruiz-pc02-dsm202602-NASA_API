@@ -44,102 +44,86 @@ import java.math.RoundingMode
 import java.text.DecimalFormat
 import java.text.DecimalFormatSymbols
 import java.util.Locale
-
-private enum class AsteroidsScreen {
-    List,
-    Favorites,
-    Detail,
-}
+import androidx.navigation.NavType
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 
 @Composable
 fun AsteroidsFeature(viewModel: NeoWsViewModel, modifier: Modifier = Modifier) {
     val state by viewModel.uiState.collectAsState()
-    var screen by rememberSaveable { mutableStateOf(AsteroidsScreen.List) }
-    var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
-    var selectedAsteroid by remember { mutableStateOf<NearEarthObject?>(null) }
-    var detailFromFavorites by rememberSaveable { mutableStateOf(false) }
+    val navController = rememberNavController()
 
-    BackHandler(enabled = screen != AsteroidsScreen.List) {
-        screen = when (screen) {
-            AsteroidsScreen.Detail -> if (detailFromFavorites) {
-                AsteroidsScreen.Favorites
-            } else {
-                AsteroidsScreen.List
-            }
-
-            AsteroidsScreen.Favorites -> AsteroidsScreen.List
-            AsteroidsScreen.List -> AsteroidsScreen.List
+    NavHost(navController = navController, startDestination = "asteroids/list", modifier = modifier) {
+        composable("asteroids/list") {
+            AsteroidListScreen(
+                title = stringResource(R.string.asteroids_title),
+                asteroids = state.asteroids.filterHazardousOnly(state.showHazardousOnly),
+                favorites = state.favorites,
+                isLoading = state.isLoading,
+                isFavoritesLoading = state.isFavoritesLoading,
+                errorMessage = state.feedErrorMessage,
+                favoritesErrorMessage = state.favoritesErrorMessage,
+                incompleteRecords = state.incompleteRecords,
+                showHazardousFilter = true,
+                hazardousOnly = state.showHazardousOnly,
+                onHazardousOnlyChanged = viewModel::setHazardousOnly,
+                onRefresh = viewModel::refresh,
+                onShowFavorites = { navController.navigate("asteroids/favorites") },
+                onSelectAsteroid = { asteroid ->
+                    navController.navigate(
+                        "asteroids/detail/${asteroid.id}/${asteroid.closeApproachDate}",
+                    )
+                },
+                onToggleFavorite = viewModel::toggleFavorite,
+            )
         }
-    }
-
-    when (screen) {
-        AsteroidsScreen.List -> AsteroidListScreen(
-            title = stringResource(R.string.asteroids_title),
-            asteroids = state.asteroids.filterHazardousOnly(state.showHazardousOnly),
-            favorites = state.favorites,
-            isLoading = state.isLoading,
-            isFavoritesLoading = state.isFavoritesLoading,
-            errorMessage = state.feedErrorMessage,
-            favoritesErrorMessage = state.favoritesErrorMessage,
-            incompleteRecords = state.incompleteRecords,
-            showHazardousFilter = true,
-            hazardousOnly = state.showHazardousOnly,
-            onHazardousOnlyChanged = viewModel::setHazardousOnly,
-            onRefresh = viewModel::refresh,
-            onShowFavorites = { screen = AsteroidsScreen.Favorites },
-            onSelectAsteroid = { asteroid ->
-                selectedId = asteroid.id
-                selectedAsteroid = asteroid
-                detailFromFavorites = false
-                screen = AsteroidsScreen.Detail
-            },
-            onToggleFavorite = viewModel::toggleFavorite,
-            modifier = modifier,
-        )
-
-        AsteroidsScreen.Favorites -> AsteroidListScreen(
-            title = stringResource(R.string.my_asteroids_title),
-            asteroids = state.favorites,
-            favorites = state.favorites,
-            isLoading = state.isFavoritesLoading,
-            isFavoritesLoading = state.isFavoritesLoading,
-            errorMessage = state.favoritesErrorMessage,
-            favoritesErrorMessage = null,
-            incompleteRecords = 0,
-            showHazardousFilter = false,
-            hazardousOnly = false,
-            onHazardousOnlyChanged = {},
-            onRefresh = null,
-            onShowFavorites = null,
-            onSelectAsteroid = { asteroid ->
-                selectedId = asteroid.id
-                selectedAsteroid = asteroid
-                detailFromFavorites = true
-                screen = AsteroidsScreen.Detail
-            },
-            onToggleFavorite = viewModel::toggleFavorite,
-            onBack = { screen = AsteroidsScreen.List },
-            modifier = modifier,
-        )
-
-        AsteroidsScreen.Detail -> {
-            val asteroid = selectedAsteroid?.takeIf { it.id == selectedId }
-                ?: state.asteroids.firstOrNull { it.id == selectedId }
-                ?: state.favorites.firstOrNull { it.id == selectedId }
+        composable("asteroids/favorites") {
+            AsteroidListScreen(
+                title = stringResource(R.string.my_asteroids_title),
+                asteroids = state.favorites,
+                favorites = state.favorites,
+                isLoading = state.isFavoritesLoading,
+                isFavoritesLoading = state.isFavoritesLoading,
+                errorMessage = state.favoritesErrorMessage,
+                favoritesErrorMessage = null,
+                incompleteRecords = 0,
+                showHazardousFilter = false,
+                hazardousOnly = false,
+                onHazardousOnlyChanged = {},
+                onRefresh = null,
+                onShowFavorites = null,
+                onSelectAsteroid = { asteroid ->
+                    navController.navigate(
+                        "asteroids/detail/${asteroid.id}/${asteroid.closeApproachDate}",
+                    )
+                },
+                onToggleFavorite = viewModel::toggleFavorite,
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(
+            route = "asteroids/detail/{id}/{date}",
+            arguments = listOf(
+                navArgument("id") { type = NavType.StringType },
+                navArgument("date") { type = NavType.StringType },
+            ),
+        ) { entry ->
+            val id = entry.arguments?.getString("id")
+            val date = entry.arguments?.getString("date")
+            val asteroid = state.asteroids.firstOrNull {
+                it.id == id && it.closeApproachDate == date
+            } ?: state.favorites.firstOrNull {
+                it.id == id && it.closeApproachDate == date
+            }
             if (asteroid != null) {
                 AsteroidDetailScreen(
                     asteroid = asteroid,
                     isFavorite = state.favorites.any { it.id == asteroid.id },
                     errorMessage = state.favoritesErrorMessage,
-                    onBack = {
-                        screen = if (detailFromFavorites) {
-                            AsteroidsScreen.Favorites
-                        } else {
-                            AsteroidsScreen.List
-                        }
-                    },
+                    onBack = { navController.popBackStack() },
                     onToggleFavorite = { viewModel.toggleFavorite(asteroid) },
-                    modifier = modifier,
                 )
             }
         }
