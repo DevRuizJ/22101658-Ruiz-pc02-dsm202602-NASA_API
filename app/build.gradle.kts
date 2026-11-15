@@ -33,8 +33,8 @@ android {
         buildConfigField("String", "NEOWS_BASE_URL", "\"https://api.nasa.gov/\"")
         buildConfigField("String", "NEOWS_FEED_ENDPOINT", "\"neo/rest/v1/feed\"")
         buildConfigField("String", "NEOWS_LOOKUP_ENDPOINT", "\"neo/rest/v1/neo/\"")
-        buildConfigField("String", "APOD_BASE_URL", "\"https://science.nasa.gov/\"")
-        buildConfigField("String", "APOD_ENDPOINT", "\"wp-json/wp/v2/apod-basic\"")
+        buildConfigField("String", "APOD_BASE_URL", "\"https://api.nasa.gov/planetary/\"")
+        buildConfigField("String", "APOD_ENDPOINT", "\"apod\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -65,6 +65,10 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.viewmodel.ktx)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.coil.compose)
+    implementation(libs.gson)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
